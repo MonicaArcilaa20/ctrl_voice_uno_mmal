@@ -8,7 +8,6 @@ from streamlit_bokeh_events import streamlit_bokeh_events
 from PIL import Image
 import paho.mqtt.client as paho
 
-
 # =========================
 # CONFIGURACIÓN GENERAL
 # =========================
@@ -115,17 +114,33 @@ def on_publish(client, userdata, result):
 
 def on_message(client, userdata, message):
     global message_received
-    time.sleep(2)
+    time.sleep(1)
     message_received = str(message.payload.decode("utf-8"))
     st.write(message_received)
 
 # =========================
 # CONFIGURACIÓN MQTT
 # =========================
-broker = "broker.mqttdashboard.com"
+# Ajustado para que coincida con tu código de Wokwi
+broker = "157.230.214.127"
 port = 1883
+topic_envio = "cmqtt_a"
+
 client1 = paho.Client("GIT-mmal")
 client1.on_message = on_message
+
+# =========================
+# FUNCIÓN DE MAPEO DE VOZ
+# =========================
+def interpretar_comando(texto):
+    texto = texto.lower().strip()
+
+    if "nube" in texto:
+        return {"Act1": "ON"}, "🟢 Se detectó la palabra 'nube' → comando ON"
+    elif "salsa" in texto:
+        return {"Act1": "OFF"}, "🔴 Se detectó la palabra 'salsa' → comando OFF"
+    else:
+        return None, "⚠️ No se detectó ni 'nube' ni 'salsa'."
 
 # =========================
 # SIDEBAR
@@ -134,20 +149,22 @@ with st.sidebar:
     st.markdown("## ⚙️ Configuración")
     st.markdown(f"**Broker:** `{broker}`")
     st.markdown(f"**Puerto:** `{port}`")
-    st.markdown("**Topic de envío:** `voice_ctrl_mmal`")
+    st.markdown(f"**Topic de envío:** `{topic_envio}`")
 
     st.markdown("---")
     st.markdown("## 🧭 Instrucciones")
     st.markdown("""
 - Presiona el botón de inicio.
-- Habla claramente al micrófono.
+- Di claramente **nube** o **salsa**.
 - La aplicación reconocerá tu voz.
-- El texto capturado será enviado por MQTT.
+- Si escucha **nube**, enviará `ON`.
+- Si escucha **salsa**, enviará `OFF`.
     """)
 
     st.markdown("---")
-    st.markdown("## 💡 Sugerencia")
-    st.markdown("Usa comandos cortos y claros para obtener mejor reconocimiento.")
+    st.markdown("## 💡 Comandos válidos")
+    st.markdown("- ☁️ **nube** → enciende")
+    st.markdown("- 🌶️ **salsa** → apaga")
 
 # =========================
 # ENCABEZADO
@@ -157,9 +174,9 @@ st.markdown('<div class="sub-title">🟢 Control por Voz con MQTT</div>', unsafe
 
 st.markdown("""
 <div class="info-box">
-    Esta aplicación permite capturar una instrucción hablada, convertirla en texto
-    y enviarla mediante <strong>MQTT</strong> al topic configurado.  
-    Es una interfaz simple, visual y funcional para trabajar con comandos de voz.
+    Esta aplicación reconoce la voz del usuario y la convierte en comandos MQTT.
+    En esta versión solo se admiten dos palabras clave:
+    <strong>nube</strong> y <strong>salsa</strong>.
 </div>
 """, unsafe_allow_html=True)
 
@@ -175,13 +192,13 @@ with col1:
     st.markdown("### 🖼️ Recurso visual")
 
     try:
-        image = Image.open('voice_ctrl.jpg')
+        image = Image.open("voice_ctrl.jpg")
         st.image(image, use_container_width=True)
     except:
         st.warning("No se encontró la imagen `voice_ctrl.jpg` en el repositorio.")
 
     st.markdown(
-        '<p class="small-note">La imagen acompaña visualmente el funcionamiento del control por voz.</p>',
+        '<p class="small-note">Pronuncia una palabra clave para activar el comando correspondiente.</p>',
         unsafe_allow_html=True
     )
     st.markdown('</div>', unsafe_allow_html=True)
@@ -189,7 +206,7 @@ with col1:
 with col2:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### 🎤 Activación del reconocimiento de voz")
-    st.write("Haz clic en el botón y habla. Cuando el sistema detecte tu voz, mostrará el texto reconocido y lo enviará automáticamente.")
+    st.write("Haz clic en el botón y di una de estas dos palabras: **nube** o **salsa**.")
 
     stt_button = Button(label="🎙️ Iniciar reconocimiento", width=220)
 
@@ -197,6 +214,7 @@ with col2:
         var recognition = new webkitSpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
+        recognition.lang = "es-ES";
 
         recognition.onresult = function (e) {
             var value = "";
@@ -221,24 +239,29 @@ with col2:
         debounce_time=0
     )
 
-    if result:
-        if "GET_TEXT" in result:
-            texto_reconocido = result.get("GET_TEXT").strip()
+    if result and "GET_TEXT" in result:
+        texto_reconocido = result.get("GET_TEXT").strip()
 
-            st.markdown("### ✅ Texto reconocido")
-            st.markdown(
-                f'<div class="result-box">🗣️ {texto_reconocido}</div>',
-                unsafe_allow_html=True
-            )
+        st.markdown("### ✅ Texto reconocido")
+        st.markdown(
+            f'<div class="result-box">🗣️ {texto_reconocido}</div>',
+            unsafe_allow_html=True
+        )
 
+        payload, mensaje_estado = interpretar_comando(texto_reconocido)
+
+        if payload is not None:
             client1.on_publish = on_publish
             client1.connect(broker, port)
 
-            message = json.dumps({"Act1": texto_reconocido})
-            ret = client1.publish("voice_ctrl_mmal", message)
+            message = json.dumps(payload)
+            client1.publish(topic_envio, message)
 
-            st.success("📡 Mensaje enviado correctamente al topic `voice_ctrl_mmal`")
+            st.success("📡 Mensaje enviado correctamente")
+            st.info(mensaje_estado)
             st.code(message, language="json")
+        else:
+            st.warning(mensaje_estado)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -248,8 +271,9 @@ with col2:
 st.write("")
 st.markdown("""
 <div class="footer-box">
-    ✅ <strong>Estado esperado:</strong> al hablar, la aplicación reconoce el texto y lo publica en MQTT.  
-    🌿 Interfaz ajustada con enfoque funcional, limpia y visualmente más agradable.
+    ✅ <strong>Comportamiento esperado:</strong><br>
+    ☁️ Si dices <strong>nube</strong>, la app enviará <code>{"Act1":"ON"}</code>.<br>
+    🌶️ Si dices <strong>salsa</strong>, la app enviará <code>{"Act1":"OFF"}</code>.
 </div>
 """, unsafe_allow_html=True)
 
